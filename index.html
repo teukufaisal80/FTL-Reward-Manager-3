@@ -1100,7 +1100,7 @@ html,body{
   </div>
   <!-- API Key update -->
   <details style="margin-top:10px">
-    <summary style="font-size:11.5px;color:var(--t3);cursor:pointer;user-select:none;padding:4px 0">&#9881;&#65039; Update API Key / Bin ID</summary>
+    <summary style="font-size:11.5px;color:var(--t3);cursor:pointer;user-select:none;padding:4px 0">&#9881;&#65039; Konfigurasi Firebase</summary>
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px;margin-top:8px;display:flex;flex-direction:column;gap:8px">
       <div class="field" style="margin:0"><label>API Key (X-Master-Key)</label>
         <input type="password" class="modal-input" id="cfgKey" placeholder="$2a$10$..." style="font-size:12px">
@@ -1294,6 +1294,9 @@ html,body{
 
 <div class="toast" id="toast"></div>
 
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
 /* ═══════════════════════════════════════
    ASSETS
@@ -1329,75 +1332,103 @@ const TAB_SLIDE=[0,1,2,3,4,5,7,9,10,11,12,13];
 /* ═══════════════════════════════════════
    JSONBIN
 ═══════════════════════════════════════ */
-// ============================================================
-// JSONBIN CONFIG — ganti API key di sini kalau expired
-// ============================================================
-function getJBKey(){return localStorage.getItem('ftl_jb_key')||'GANTI_API_KEY_DISINI';}
-function getJBBin(){return localStorage.getItem('ftl_jb_bin')||'69d75329aaba882197dc322a';}
-// ============================================================
-const JB_BASE='https://api.jsonbin.io/v3/b/';
+/* ═══════════════════════════════════════
+   FIREBASE FIRESTORE
+═══════════════════════════════════════ */
+// Firebase config — aman di frontend (by design Google)
+const firebaseConfig = {
+  apiKey:            "AIzaSyBIz6N0amt1ljPZhhOe-zAzzOikcLYUTm0",
+  authDomain:        "ftl-reward-manager.firebaseapp.com",
+  projectId:         "ftl-reward-manager",
+  storageBucket:     "ftl-reward-manager.firebasestorage.app",
+  messagingSenderId: "632576941008",
+  appId:             "1:632576941008:web:9792b0ab4bf197652cf7d5"
+};
 
-function setJBStatus(state,txt){
-  ['jbDot','connDot'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el){el.className='status-dot'+(state?' '+state:'');}
+// Firebase SDK loaded via CDN scripts below
+// db = Firestore instance, initialized after SDK loads
+let _db = null;
+
+async function getDB() {
+  if (_db) return _db;
+  // Wait for Firebase to be available (loaded via script tags)
+  let attempts = 0;
+  while (typeof firebase === 'undefined' && attempts < 20) {
+    await new Promise(r => setTimeout(r, 200));
+    attempts++;
+  }
+  if (typeof firebase === 'undefined') throw new Error('Firebase SDK gagal dimuat');
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  _db = firebase.firestore();
+  return _db;
+}
+
+const FS_COLLECTION = 'ftl_awarding';
+const FS_DOC        = 'sessions';
+
+// ── Status helpers ──────────────────────────────────────────
+function setJBStatus(state, txt) {
+  ['jbDot','connDot'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.className = 'status-dot' + (state ? ' '+state : '');
   });
-  const lbl=document.getElementById('jbStatusTxt');
-  if(lbl) lbl.textContent=txt;
+  const lbl = document.getElementById('jbStatusTxt');
+  if (lbl) lbl.textContent = txt;
 }
 
-async function jbRead(){
-  const r=await fetch(JB_BASE+getJBBin()+'/latest',{headers:{'X-Master-Key':getJBKey(),'X-Bin-Meta':'false'}});
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const d=await r.json();
-  return d.record!==undefined?d.record:d;
-}
-async function jbWrite(payload){
-  const r=await fetch(JB_BASE+getJBBin(),{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':getJBKey()},body:JSON.stringify(payload)});
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  return r.json();
+// ── Read all sessions ────────────────────────────────────────
+async function fbRead() {
+  const db  = await getDB();
+  const ref = db.collection(FS_COLLECTION).doc(FS_DOC);
+  const snap = await ref.get();
+  if (!snap.exists) return { sessions: [] };
+  return snap.data();
 }
 
-async function jbTestConn(){
-  setJBStatus('loading','Menghubungkan…');
-  try{
-    await jbRead();
-    setJBStatus('ok','Terhubung ✓');
-    toast('Koneksi berhasil','ok');
-  }catch(e){
-    const msg=getErrMsg(e);
-    setJBStatus('err',msg);
-    toast('Koneksi gagal — '+msg,'err');
+// ── Write all sessions ───────────────────────────────────────
+async function fbWrite(payload) {
+  const db  = await getDB();
+  const ref = db.collection(FS_COLLECTION).doc(FS_DOC);
+  await ref.set(payload);
+}
+
+// ── Test connection ──────────────────────────────────────────
+async function jbTestConn() {
+  setJBStatus('loading', 'Menghubungkan ke Firebase…');
+  try {
+    await fbRead();
+    setJBStatus('ok', 'Terhubung ke Firebase ✓');
+    toast('Koneksi Firebase berhasil', 'ok');
+  } catch(e) {
+    setJBStatus('err', 'Gagal: ' + e.message);
+    toast('Koneksi gagal: ' + e.message, 'err');
   }
 }
 
-async function loadSessionList(){
-  const el=document.getElementById('jbSessionList');
-  if(el) el.innerHTML=loadingHTML();
-  setJBStatus('loading','Mengambil data…');
-  try{
-    const data=await jbRead();
-    const sessions=data.sessions||[];
-    setJBStatus('ok','Terhubung ✓ — '+sessions.length+' sesi');
+// ── Load session list UI ─────────────────────────────────────
+async function loadSessionList() {
+  const el = document.getElementById('jbSessionList');
+  if (el) el.innerHTML = '<div style="text-align:center;color:var(--t3);font-size:12.5px;padding:16px 0">Memuat…</div>';
+  setJBStatus('loading', 'Mengambil data…');
+  try {
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    setJBStatus('ok', 'Terhubung ✓ — ' + sessions.length + ' sesi');
     renderJBList(sessions);
-  }catch(e){
-    setJBStatus('err','Gagal: '+e.message);
-    if(el) el.innerHTML=`<div style="color:var(--red);font-size:12.5px;text-align:center;padding:12px">Gagal load — ${getErrMsg(e)}</div>`;
+  } catch(e) {
+    setJBStatus('err', 'Gagal: ' + e.message);
+    if (el) el.innerHTML = `<div style="color:var(--red);font-size:12.5px;text-align:center;padding:12px">Gagal load — ${e.message}</div>`;
   }
 }
 
-function loadingHTML(){
-  return '<div style="text-align:center;color:var(--t3);font-size:12.5px;padding:16px 0">Memuat…</div>';
-}
-
-function renderJBList(sessions){
-  const el=document.getElementById('jbSessionList');
-  if(!el) return;
-  if(!sessions.length){
-    el.innerHTML='<div style="text-align:center;color:var(--t3);font-size:12.5px;padding:16px 0">Belum ada sesi tersimpan</div>';
+function renderJBList(sessions) {
+  const el = document.getElementById('jbSessionList');
+  if (!el) return;
+  if (!sessions.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--t3);font-size:12.5px;padding:16px 0">Belum ada sesi tersimpan</div>';
     return;
   }
-  el.innerHTML=sessions.map((s,i)=>`
+  el.innerHTML = sessions.map((s,i) => `
     <div class="session-item">
       <div class="session-info" onclick="loadNamedSession(${i})" style="cursor:pointer">
         <div class="session-name">${escH(s.name)}</div>
@@ -1410,128 +1441,148 @@ function renderJBList(sessions){
     </div>`).join('');
 }
 
-/* ── error message helper ── */
-function getErrMsg(e){
-  if(!navigator.onLine) return 'No Connection';
-  const m=String(e?.message||e||'');
-  if(m.includes('401')) return 'API Key tidak valid';
-  if(m.includes('404')) return 'Bin ID tidak ditemukan';
-  if(m.includes('429')) return 'Terlalu banyak request, coba lagi sebentar';
-  if(m.includes('5')) return 'Server JSONBin error';
-  if(m.includes('Failed to fetch')||m.includes('NetworkError')||m.includes('Load failed')) return 'No Connection';
-  return m||'Unknown error';
-}
-
-async function saveNamedSession(){
-  const nameEl=document.getElementById('saveNameInput');
-  const name=nameEl?nameEl.value.trim():'';
-  if(!name){toast('Isi nama sesi dulu','err');nameEl?.focus();return;}
-  if(!navigator.onLine){toast('Gagal save — No Connection','err');return;}
-  setJBStatus('loading','Menyimpan…');toast('Menyimpan…');
-  try{
-    const data=await jbRead();
-    const sessions=data.sessions||[];
-    const entry={name,month:ST.month,year:ST.year,savedAt:new Date().toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),data:JSON.parse(JSON.stringify(ST.aw)),hidden:JSON.parse(JSON.stringify(ST.hidden||{}))};
-    const idx=sessions.findIndex(s=>s.name===name);
-    if(idx>=0){if(!confirm(`Sesi "${name}" sudah ada. Timpa?`))return;sessions[idx]=entry;}
-    else sessions.unshift(entry);
-    await jbWrite({sessions});
-    setJBStatus('ok','Tersimpan ✓ — '+sessions.length+' sesi');
-    toast('"'+name+'" berhasil disimpan ✓','ok');
-    if(nameEl) nameEl.value='';
+// ── Save named session ───────────────────────────────────────
+async function saveNamedSession() {
+  const nameEl = document.getElementById('saveNameInput');
+  const name   = nameEl ? nameEl.value.trim() : '';
+  if (!name) { toast('Isi nama sesi dulu', 'err'); nameEl?.focus(); return; }
+  if (!navigator.onLine) { toast('Gagal save — No Connection', 'err'); return; }
+  setJBStatus('loading', 'Menyimpan…'); toast('Menyimpan…');
+  try {
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    const entry    = {
+      name, month: ST.month, year: ST.year,
+      savedAt: new Date().toLocaleString('id-ID', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+      data:    JSON.parse(JSON.stringify(ST.aw)),
+      hidden:  JSON.parse(JSON.stringify(ST.hidden || {}))
+    };
+    const idx = sessions.findIndex(s => s.name === name);
+    if (idx >= 0) {
+      if (!confirm(`Sesi "${name}" sudah ada. Timpa?`)) return;
+      sessions[idx] = entry;
+    } else {
+      sessions.unshift(entry);
+    }
+    await fbWrite({ sessions });
+    setJBStatus('ok', 'Tersimpan ✓ — ' + sessions.length + ' sesi');
+    toast('"' + name + '" berhasil disimpan ✓', 'ok');
+    if (nameEl) nameEl.value = '';
     renderJBList(sessions);
-    try{localStorage.setItem('ftl_bkp_'+name,JSON.stringify(entry));}catch(e){}
-  }catch(e){
-    const msg=getErrMsg(e);
-    setJBStatus('err','Gagal: '+msg);
-    toast('Gagal save — '+msg,'err');
+    try { localStorage.setItem('ftl_bkp_' + name, JSON.stringify(entry)); } catch(e) {}
+  } catch(e) {
+    setJBStatus('err', 'Gagal: ' + e.message);
+    toast('Gagal save — ' + e.message, 'err');
   }
 }
 
-async function loadNamedSession(idx){
-  setJBStatus('loading','Memuat…');
-  try{
-    const data=await jbRead();
-    const s=data.sessions?.[idx];
-    if(!s) throw new Error('Sesi tidak ditemukan');
-    ST.month=s.month||ST.month;ST.year=s.year||ST.year;ST.aw=s.data;
-    if(s.hidden) ST.hidden=s.hidden;
-    document.getElementById('periodLabel').textContent=ST.month+' '+ST.year;
+// ── Load named session ───────────────────────────────────────
+async function loadNamedSession(idx) {
+  setJBStatus('loading', 'Memuat…');
+  try {
+    const data = await fbRead();
+    const s    = data.sessions?.[idx];
+    if (!s) throw new Error('Sesi tidak ditemukan');
+    ST.month = s.month || ST.month;
+    ST.year  = s.year  || ST.year;
+    ST.aw    = s.data;
+    if (s.hidden) ST.hidden = s.hidden;
+    document.getElementById('periodLabel').textContent = ST.month + ' ' + ST.year;
     renderAll();
-    setJBStatus('ok','Dimuat: '+s.name);
-    toast('Dimuat: "'+s.name+'"','ok');
+    setJBStatus('ok', 'Dimuat: ' + s.name);
+    toast('Dimuat: "' + s.name + '"', 'ok');
     closeModal('jbModal');
-  }catch(e){
-    const msg=getErrMsg(e);
-    setJBStatus('err','Gagal: '+msg);
-    toast('Gagal load — '+msg,'err');
+  } catch(e) {
+    setJBStatus('err', 'Gagal: ' + e.message);
+    toast('Gagal load — ' + e.message, 'err');
   }
 }
 
-async function deleteNamedSession(idx){
-  try{
-    if(!navigator.onLine){toast('Gagal hapus — No Connection','err');return;}
-    const data=await jbRead();
-    const sessions=data.sessions||[];
-    const s=sessions[idx];
-    if(!s) return;
-    if(!confirm(`Hapus "${s.name}"? Tidak bisa diundo.`))return;
-    setJBStatus('loading','Menghapus…');
-    sessions.splice(idx,1);
-    await jbWrite({sessions});
-    setJBStatus('ok','Dihapus ✓ — '+sessions.length+' sesi');
-    toast('"'+s.name+'" berhasil dihapus','ok');
+// ── Delete named session ─────────────────────────────────────
+async function deleteNamedSession(idx) {
+  try {
+    if (!navigator.onLine) { toast('Gagal hapus — No Connection', 'err'); return; }
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    const s        = sessions[idx];
+    if (!s) return;
+    if (!confirm(`Hapus "${s.name}"? Tidak bisa diundo.`)) return;
+    setJBStatus('loading', 'Menghapus…');
+    sessions.splice(idx, 1);
+    await fbWrite({ sessions });
+    setJBStatus('ok', 'Dihapus ✓ — ' + sessions.length + ' sesi');
+    toast('"' + s.name + '" berhasil dihapus', 'ok');
     renderJBList(sessions);
-  }catch(e){
-    const msg=getErrMsg(e);
-    setJBStatus('err','Gagal: '+msg);
-    toast('Gagal hapus — '+msg,'err');
+  } catch(e) {
+    setJBStatus('err', 'Gagal: ' + e.message);
+    toast('Gagal hapus — ' + e.message, 'err');
   }
 }
 
-async function saveOnline(){
-  const name=ST.month+' '+ST.year+' (auto)';
+// ── Quick save (Ctrl+S / topbar) ─────────────────────────────
+async function saveOnline() {
+  const name = ST.month + ' ' + ST.year + ' (auto)';
   toast('Menyimpan…');
-  try{
-    // Check internet first
-    if(!navigator.onLine) throw new Error('No Connection');
-    const data=await jbRead();
-    const sessions=data.sessions||[];
-    const entry={name,month:ST.month,year:ST.year,savedAt:new Date().toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),data:JSON.parse(JSON.stringify(ST.aw))};
-    const idx=sessions.findIndex(s=>s.name===name);
-    if(idx>=0) sessions[idx]=entry; else sessions.unshift(entry);
-    await jbWrite({sessions});
-    toast('Berhasil disimpan ✓','ok');
-    try{localStorage.setItem('ftl_bkp_auto',JSON.stringify(entry));}catch(e){}
-  }catch(e){
-    const msg=getErrMsg(e);
-    toast('Gagal save — '+msg,'err');
-    // Fallback to localStorage silently
-    try{localStorage.setItem('ftl_bkp_auto',JSON.stringify({name,data:ST.aw}));}catch(ee){}
+  try {
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    const entry    = {
+      name, month: ST.month, year: ST.year,
+      savedAt: new Date().toLocaleString('id-ID', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+      data:    JSON.parse(JSON.stringify(ST.aw)),
+      hidden:  JSON.parse(JSON.stringify(ST.hidden || {}))
+    };
+    const idx = sessions.findIndex(s => s.name === name);
+    if (idx >= 0) sessions[idx] = entry; else sessions.unshift(entry);
+    await fbWrite({ sessions });
+    toast('Berhasil disimpan ✓', 'ok');
+    try { localStorage.setItem('ftl_bkp_auto', JSON.stringify(entry)); } catch(e) {}
+  } catch(e) {
+    toast('Tersimpan lokal (offline mode)', '');
+    try { localStorage.setItem('ftl_bkp_auto', JSON.stringify({name, data: ST.aw})); } catch(ee) {}
   }
 }
 
-function openSaveModal(){
+// ── Open save modal ──────────────────────────────────────────
+function openSaveModal() {
   showModal('jbModal');
   loadSessionList();
-  const el=document.getElementById('saveNameInput');
-  if(el&&!el.value) el.value=ST.month+' '+ST.year;
-  // Pre-fill config fields
-  const ck=document.getElementById('cfgKey');
-  const cb=document.getElementById('cfgBin');
-  if(ck) ck.placeholder=getJBKey().slice(0,12)+'…';
-  if(cb) cb.value=getJBBin();
+  const el = document.getElementById('saveNameInput');
+  if (el && !el.value) el.value = ST.month + ' ' + ST.year;
 }
 
-async function saveAPIConfig(){
-  const newKey=document.getElementById('cfgKey')?.value.trim();
-  const newBin=document.getElementById('cfgBin')?.value.trim();
-  if(newKey) localStorage.setItem('ftl_jb_key', newKey);
-  if(newBin) localStorage.setItem('ftl_jb_bin', newBin);
-  await jbTestConn();
-  if(newKey||newBin) toast('API config diperbarui','ok');
+// ── Render sessions in period modal ─────────────────────────
+async function renderSessionsUI() {
+  try {
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    const html     = sessions.length === 0 ? '' : sessions.slice(0,5).map(s => `
+      <div class="session-item" onclick="loadNamedSession_period('${escH(s.name)}')">
+        <div class="session-info">
+          <div class="session-name">${escH(s.name)}</div>
+          <div class="session-meta">${escH(s.savedAt)}</div>
+        </div>
+      </div>`).join('');
+    ['sessionsList','sessionsListFull'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = html;
+    });
+    const saved = document.getElementById('savedSessions');
+    if (saved) saved.style.display = sessions.length ? 'block' : 'none';
+  } catch(e) {}
 }
 
+async function loadNamedSession_period(name) {
+  try {
+    const data     = await fbRead();
+    const sessions = data.sessions || [];
+    const idx      = sessions.findIndex(s => s.name === name);
+    if (idx >= 0) await loadNamedSession(idx);
+  } catch(e) {}
+}
+
+// Legacy stubs
+function getJBKey() { return ''; }
+function getJBBin() { return ''; }
 /* ═══════════════════════════════════════
    MODALS
 ═══════════════════════════════════════ */
